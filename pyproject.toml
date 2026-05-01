@@ -19,6 +19,16 @@ dependencies = [
     "scikit-learn",
     "scipy",
 ]
+license = { text = "MIT" } 
+authors = [{ name = "Jean-Baptiste Chaudron", email = "jb.chaudron8@gmail.com" }]
+keywords = ["eeg", "emotiv", "imu", "artefact", "regression"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
 
 [project.optional-dependencies]
 catboost = ["catboost"]
@@ -26,3 +36,7 @@ dev = ["pytest"]
 
 [project.scripts]
 emotivphysicimu = "emotivphysicimu.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jb-chaudron/EmotivPhysicIMU"
+Issues = "https://github.com/jb-chaudron/EmotivPhysicIMU/issues"

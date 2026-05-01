@@ -3,12 +3,27 @@
 Small API for pairing Emotiv IMU movement features with EEG targets, fitting light artefact models, and plotting predictions.
 
 ```python
-from emotivphysicimu import extract_features, fit_model, plot_predictions
 
-features = extract_features(raw_imu, raw_eeg, n_points=10, target_ratio=4)
-model, report = fit_model(features.X, features.y, model="linear_regression")
-y_pred = model.predict(features.X)
-plot_predictions(features.y, y_pred, channel_names=features.eeg_channels)
+from emotivphysicimu.features import extract_features
+from emotivphysicimu.constants import IMU_CHANNELS_UNIQUE, EMOTIV_CHANNELS
+import mne
+path = ""
+raw = mne.io.read_raw(path)
+raw.load_data()
+raw = raw.filter(1, 40)
+fs = extract_features(raw, imu_channels=IMU_CHANNELS_UNIQUE)
+print("X:", fs.X.shape, "y:", fs.y.shape, "sfreq:", fs.sfreq)
+
+from emotivphysicimu.model import IMURegressor
+model = IMURegressor(sfreq=fs.sfreq, eeg_channels=EMOTIV_CHANNELS, channel_handling="all_channels",conformal=True)
+
+
+y_pred = model.predict(fs.X)
+
+
+from emotivphysicimu import IMUReport
+
+IMUReport(model, X_train=fs.X, y_train=fs.y).generate("report.html")
 ```
 
 The feature API expects two `mne.io.Raw` objects: one EEG stream and one IMU stream. EEG targets are averaged over `target_ratio` raw samples, so by default four EEG samples are paired with each IMU sample.
