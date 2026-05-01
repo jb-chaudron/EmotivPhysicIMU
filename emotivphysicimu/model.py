@@ -167,17 +167,25 @@ class IMURegressor:
         coef = self.numerators_[:, None] / np.maximum(widths, eps)
         return y - coef * y_pred
 
-    def score(self, X: NDArray, y: NDArray) -> dict[str, NDArray]:
-        """Per-channel EEG quality of the cleaned signal."""
+    def score(self, X: NDArray, y: NDArray) -> dict[str, dict[str, NDArray]]:
+        """Per-channel EEG quality before vs. after correction.
+
+        Returns a dict with three sub-dicts: ``"raw"`` (metrics on the input
+        ``y``), ``"cleaned"`` (metrics on ``clean(y, X)``), and ``"delta"``
+        (cleaned - raw). Each sub-dict has the keys ``kurtosis``,
+        ``spectral_slope``, and ``hfp_tp`` with shape ``(n_channels,)``.
+        """
         if self.sfreq is None:
             raise ValueError("score() requires sfreq to be set")
+        y_raw = _as_2d(y)
         cleaned = self.clean(y, X)
-        per_channel = [eeg_quality(cleaned[c], sfreq=self.sfreq) for c in range(cleaned.shape[0])]
-        return {
-            "kurtosis": np.array([m["kurtosis"] for m in per_channel]),
-            "spectral_slope": np.array([m["spectral_slope"] for m in per_channel]),
-            "hfp_tp": np.array([m["hfp_tp"] for m in per_channel]),
-        }
+        raw_q = [eeg_quality(y_raw[c], sfreq=self.sfreq) for c in range(y_raw.shape[0])]
+        clean_q = [eeg_quality(cleaned[c], sfreq=self.sfreq) for c in range(cleaned.shape[0])]
+        keys = ("kurtosis", "spectral_slope", "hfp_tp")
+        raw = {k: np.array([m[k] for m in raw_q]) for k in keys}
+        cleaned_d = {k: np.array([m[k] for m in clean_q]) for k in keys}
+        delta = {k: cleaned_d[k] - raw[k] for k in keys}
+        return {"raw": raw, "cleaned": cleaned_d, "delta": delta}
 
     def prediction_score(self, X: NDArray, y: NDArray) -> dict[str, NDArray]:
         """Per-channel RMSE / MAE / R^2 of ``predict(X)`` vs ``y``."""

@@ -5,8 +5,8 @@ import pytest
 
 matplotlib.use("Agg")
 
-from emotivphysicimu import IMURegressor, extract_features, plot_predictions
-from emotivphysicimu.constants import IMU_CHANNELS
+from emotivphysicimu import IMURegressor, IMUReport, extract_features, plot_predictions
+from emotivphysicimu.constants import EMOTIV_CHANNELS, IMU_CHANNELS
 from emotivphysicimu.model import NUMERATORS
 
 
@@ -115,13 +115,19 @@ def test_imuregressor_residual_chain_three_stages_predicts_shape():
     assert regressor.predict(X).shape == y.shape
 
 
-def test_imuregressor_score_returns_per_channel_eeg_quality():
+def test_imuregressor_score_returns_raw_cleaned_and_delta():
     X, y = _toy(n_channels=2, n_points=400)
     regressor = IMURegressor(eeg_channels=["AF3", "F7"], sfreq=128.0).fit(X, y)
     score = regressor.score(X, y)
-    assert set(score) == {"kurtosis", "spectral_slope", "hfp_tp"}
-    for arr in score.values():
-        assert arr.shape == (2,)
+    assert set(score) == {"raw", "cleaned", "delta"}
+    for section in score.values():
+        assert set(section) == {"kurtosis", "spectral_slope", "hfp_tp"}
+        for arr in section.values():
+            assert arr.shape == (2,)
+    for k in ("kurtosis", "spectral_slope", "hfp_tp"):
+        np.testing.assert_allclose(
+            score["delta"][k], score["cleaned"][k] - score["raw"][k]
+        )
 
 
 def test_imuregressor_prediction_score_keys():
@@ -184,6 +190,43 @@ def test_imuregressor_use_electrode_feature_requires_all_channels():
             channel_handling="per_channel",
             use_electrode_feature=True,
         )
+
+
+def test_imureport_generates_html(tmp_path):
+    rng = np.random.default_rng(0)
+    n_channels = len(EMOTIV_CHANNELS)
+    n_points, n_features = 500, 4
+    X = rng.normal(size=(n_channels, n_points, n_features))
+    weights = rng.normal(size=(n_channels, n_features))
+    y = (
+        np.einsum("cnf,cf->cn", X, weights)
+        + 0.1 * rng.normal(size=(n_channels, n_points))
+    )
+
+    regressor = IMURegressor(eeg_channels=EMOTIV_CHANNELS, sfreq=128.0).fit(X, y)
+    report = IMUReport(
+        regressor,
+        X_train=X,
+        y_train=y,
+        X_test=X,
+        y_test=y,
+        ica_n_components=4,
+        ica_max_iter=100,
+        n_plot_points=200,
+    )
+    out = report.generate(tmp_path / "report.html")
+
+    assert out.exists()
+    text = out.read_text(encoding="utf-8")
+    assert len(text) > 1000
+    for anchor in (
+        'id="section-hyperparameters"',
+        'id="section-signal-plots"',
+        'id="section-metrics"',
+        'id="section-ica"',
+    ):
+        assert anchor in text
+    assert "data:image/png;base64," in text
 
 
 def test_plot_predictions_writes_file(tmp_path):

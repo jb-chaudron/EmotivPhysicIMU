@@ -10,12 +10,14 @@ from .metrics import (
     rank_composite,
 )
 from .model import NUMERATORS, IMURegressor
+from .report import IMUReport
 
 __all__ = [
     "EMOTIV_CHANNELS",
     "IMU_CHANNELS",
     "FeatureSet",
     "IMURegressor",
+    "IMUReport",
     "NUMERATORS",
     "coherence",
     "eeg_quality",

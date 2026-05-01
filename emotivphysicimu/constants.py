@@ -16,3 +16,4 @@ EMOTIV_CHANNELS = [
 ]
 
 IMU_CHANNELS = ["Q0", "Q1", "Q2", "Q3", "ACCX", "ACCY", "ACCZ", "MAGX", "MAGY", "MAGZ"]
+IMU_CHANNELS_UNIQUE = ['MOT.Q0', 'MOT.Q1', 'MOT.Q2', 'MOT.Q3', 'MOT.AccX', 'MOT.AccY', 'MOT.AccZ', 'MOT.MagX', 'MOT.MagY', 'MOT.MagZ']

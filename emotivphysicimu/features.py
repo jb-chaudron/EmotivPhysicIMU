@@ -7,7 +7,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from numpy.typing import NDArray
 
-from .constants import EMOTIV_CHANNELS, IMU_CHANNELS
+from .constants import EMOTIV_CHANNELS, IMU_CHANNELS, IMU_CHANNELS_UNIQUE
 from .physics import (
     compute_electrode_motion_features,
     compute_lorentzian_features,
@@ -56,8 +56,9 @@ def extract_features(
     raw_imu=None,
     *,
     eeg_channels: Sequence[str] = EMOTIV_CHANNELS,
+    imu_channels: Sequence[str] = IMU_CHANNELS,
     n_windows: int = 1,
-    target_ratio: int = 4,
+    target_ratio: int | None = None,
     physics: bool = False,
 ) -> FeatureSet:
     """Extract IMU-derived features paired with averaged EEG targets.
@@ -73,27 +74,40 @@ def extract_features(
         Number of past IMU steps stacked as features for the current EEG step
         (>= 1). The first `n_windows` EEG steps are dropped to align with the
         windowed features.
-    target_ratio : int
-        EEG samples averaged per IMU sample.
+    target_ratio : int or None
+        EEG samples averaged per IMU sample. If None (default), derived from
+        `raw_eeg.n_times // imu_source.n_times`. For a single-Raw input, this
+        evaluates to 1 (no averaging) since EEG and IMU share a sample rate.
     physics : bool
         If True, build physics-informed per-electrode features. Otherwise stack
         raw IMU values + yaw/pitch/roll, tiled across channels.
     """
     if n_windows < 1:
         raise ValueError("n_windows must be >= 1")
-    if target_ratio <= 0:
-        raise ValueError("target_ratio must be > 0")
 
     eeg_channels = list(eeg_channels)
     imu_source = raw_imu if raw_imu is not None else raw_eeg
 
     _validate_channels(raw_eeg, eeg_channels, raw_name="raw_eeg")
-    _validate_channels(imu_source, IMU_CHANNELS, raw_name="raw_imu")
+    _validate_channels(imu_source, imu_channels, raw_name="raw_imu")
+
+    if target_ratio is None:
+        eeg_n = int(raw_eeg.n_times)
+        imu_n = int(imu_source.n_times)
+        if imu_n == 0 or eeg_n % imu_n != 0:
+            raise ValueError(
+                "Cannot auto-derive target_ratio: raw_eeg.n_times="
+                f"{eeg_n} is not a positive multiple of imu_source.n_times={imu_n}. "
+                "Pass target_ratio explicitly."
+            )
+        target_ratio = eeg_n // imu_n
+    if target_ratio <= 0:
+        raise ValueError("target_ratio must be > 0")
 
     if physics:
-        feats_cnf, feature_blocks, feature_names = _physics_features(imu_source, eeg_channels)
+        feats_cnf, feature_blocks, feature_names = _physics_features(imu_source, eeg_channels, imu_channels)
     else:
-        feats_cnf, feature_blocks, feature_names = _movement_features(imu_source, len(eeg_channels))
+        feats_cnf, feature_blocks, feature_names = _movement_features(imu_source, len(eeg_channels), imu_channels)
 
     X = _stack_past_windows(feats_cnf, n_windows)
     feature_blocks = {name: slice(sl.start * n_windows, sl.stop * n_windows) for name, sl in feature_blocks.items()}
@@ -167,8 +181,9 @@ def _extract_target(
 def _movement_features(
     raw_imu,
     n_channels: int,
+    channels: list[str] = IMU_CHANNELS,
 ) -> tuple[NDArray, dict[str, slice], list[str]]:
-    motion = raw_imu.get_data(picks=IMU_CHANNELS)
+    motion = raw_imu.get_data(picks=channels)
     yaw, pitch, roll = _quat_to_ypr(motion[0], motion[1], motion[2], motion[3])
     feats = np.vstack([yaw[None, :], pitch[None, :], roll[None, :], motion])
     n_features, n_samples = feats.shape
@@ -178,7 +193,7 @@ def _movement_features(
         (n_channels, n_samples, n_features),
     ).copy()
 
-    feature_names = ["yaw", "pitch", "roll"] + list(IMU_CHANNELS)
+    feature_names = ["yaw", "pitch", "roll"] + list(channels)
     feature_blocks = {"motion_history": slice(0, n_features)}
     return feats_cnf, feature_blocks, feature_names
 
@@ -186,16 +201,21 @@ def _movement_features(
 def _physics_features(
     raw_imu,
     eeg_channels: Sequence[str],
+    channels: list[str] = IMU_CHANNELS,
 ) -> tuple[NDArray, dict[str, slice], list[str]]:
     coords, coord_channels = get_emotiv_coords(list(eeg_channels))
     if coord_channels != list(eeg_channels):
         raise ValueError(
             f"Only found coordinates for {coord_channels}, expected {list(eeg_channels)}"
         )
-
-    quats = raw_imu.get_data(picks=["Q0", "Q1", "Q2", "Q3"], units="uV").T
-    accels = raw_imu.get_data(picks=["ACCX", "ACCY", "ACCZ"], units="uV").T
-    magnetic = raw_imu.get_data(picks=["MAGX", "MAGY", "MAGZ"], units="uV").T
+    if "Q0" in channels:
+        quats = raw_imu.get_data(picks=["Q0", "Q1", "Q2", "Q3"], units="uV").T
+        accels = raw_imu.get_data(picks=["ACCX", "ACCY", "ACCZ"], units="uV").T
+        magnetic = raw_imu.get_data(picks=["MAGX", "MAGY", "MAGZ"], units="uV").T
+    else:
+        quats = raw_imu.get_data(picks=["MOT.Q0", "MOT.Q1", "MOT.Q2", "MOT.Q3"], units="uV").T
+        accels = raw_imu.get_data(picks=["MOT.AccX", "MOT.AccY", "MOT.AccZ"], units="uV").T
+        magnetic = raw_imu.get_data(picks=["MOT.MagX", "MOT.MagY", "MOT.MagZ"], units="uV").T
 
     lorentz = compute_lorentzian_features(coords, quats, accels, magnetic)
     motion = compute_electrode_motion_features(coords, quats, accels)
